@@ -36,12 +36,12 @@ let update x v s = fun y -> if x = y then v else s y
 let s = update "x" 1 @@ update "y" 2 @@ update "z" 3 @@ update "t" 4 empty
 
 (* Some testing; comment this definition out when submitting the solution. *)
-let _ =
+(* let _ =
   List.iter
     (fun x ->
        try  Printf.printf "%s=%d\n" x @@ s x
        with Failure s -> Printf.printf "%s\n" s
-    ) ["x"; "a"; "y"; "z"; "t"; "b"]
+    ) ["x"; "a"; "y"; "z"; "t"; "b"] *)
 
 (* Expression evaluator
 
@@ -50,5 +50,35 @@ let _ =
    Takes a state and an expression, and returns the value of the expression in 
    the given state.
 *)
-let eval = failwith "Not implemented yet"
-                    
+
+let toInt b = if b then 1 else 0
+let toBool n = n <> 0
+
+(* returnInt : (a -> a -> bool) -> (a -> a -> int) *)
+let returnInt op x y = toInt @@ op x y
+
+(* makeInt : (bool -> bool -> bool) -> (int -> int -> int) *)
+let makeInt op x y = toInt @@ op (toBool x) (toBool y)
+
+let rec eval s e =
+  match e with
+  | Const n -> n
+  | Var v -> s v
+  | Binop (op, x, y) -> funcOf op (eval s x) (eval s y)
+and funcOf op = 
+  match op with
+  | "+"  -> ( + )
+  | "-"  -> ( - )
+  | "*"  -> ( * )
+  | "/"  -> ( / )
+  | "%"  -> (mod)
+  | "<"  -> ( returnInt (<) )
+  | "<=" -> ( returnInt (<=) )
+  | ">"  -> ( returnInt (>) )
+  | ">=" -> ( returnInt (>=) )
+  | "==" -> ( returnInt (=) )
+  | "!=" -> ( returnInt (<>) )
+  | "&&" -> ( makeInt (&&) )
+  | "!!" -> ( makeInt (||) )
+  | _ -> failwith "Unknown operator"
+
