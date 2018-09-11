@@ -41,7 +41,36 @@ module Expr =
        Takes a state and an expression, and returns the value of the expression in 
        the given state.
     *)
-    let eval _ = failwith "Not implemented yet"
+    let toInt b = if b then 1 else 0
+    let toBool n = n <> 0
+    
+    (* returnInt : (a -> a -> bool) -> (a -> a -> int) *)
+    let returnInt op x y = toInt @@ op x y
+    
+    (* makeInt : (bool -> bool -> bool) -> (int -> int -> int) *)
+    let makeInt op x y = toInt @@ op (toBool x) (toBool y)
+    
+    let rec eval s e =
+      match e with
+      | Const n -> n
+      | Var v -> s v
+      | Binop (op, x, y) -> funcOf op (eval s x) (eval s y)
+    and funcOf op = 
+      match op with
+      | "+"  -> ( + )
+      | "-"  -> ( - )
+      | "*"  -> ( * )
+      | "/"  -> ( / )
+      | "%"  -> (mod)
+      | "<"  -> ( returnInt (<) )
+      | "<=" -> ( returnInt (<=) )
+      | ">"  -> ( returnInt (>) )
+      | ">=" -> ( returnInt (>=) )
+      | "==" -> ( returnInt (=) )
+      | "!=" -> ( returnInt (<>) )
+      | "&&" -> ( makeInt (&&) )
+      | "!!" -> ( makeInt (||) )
+      | _ -> failwith "Unknown operator"
 
   end
                     
