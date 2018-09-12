@@ -4,7 +4,8 @@
 open GT
 
 (* Opening a library for combinator-based syntax analysis *)
-open Ostap.Combinators
+open Ostap
+open Matcher
        
 (* Simple expressions: syntax and semantics *)
 module Expr =
@@ -81,8 +82,24 @@ module Expr =
          DECIMAL --- a decimal constant [0-9]+ as a string
    
     *)
+    let make_node op = fun x y -> Binop (op, x, y)
+
     ostap (
-      parse: empty {failwith "Not implemented yet"}
+      expr:
+        !(Util.expr
+        (fun x -> x)
+        [|
+          `Lefta , [ostap ("!!"), make_node "!!"];
+          `Lefta , [ostap ("&&"), make_node "&&"];
+          `Lefta , [ostap ("<="), make_node "<="; ostap ("<"), make_node "<"; ostap (">="), make_node ">="; ostap (">"), make_node ">"];
+          `Lefta , [ostap ("=="), make_node "=="; ostap ("!="), make_node "!="];
+          `Lefta , [ostap ("+"), make_node "+"; ostap ("-"), make_node "-"];
+          `Lefta , [ostap ("*"), make_node "*"; ostap ("/"), make_node "/"; ostap ("%"), make_node "%"];
+        |]
+        primary
+      );
+ 
+      primary: n:DECIMAL {Const n} | x:IDENT {Var x} | -"(" expr -")"
     )
 
   end
@@ -111,7 +128,7 @@ module Stmt =
       match stmt with
       | Read x -> (match i with
                   | [] -> failwith "Input is empty; nothing to read"
-                  | v :: is -> (Expr.update x v s, i, o))
+                  | v :: is -> (Expr.update x v s, is, o))
       | Write e -> (s, i, o @ [Expr.eval s e])
       | Assign (x, e) -> (Expr.update x (Expr.eval s e) s, i, o)
       | Seq (st1, st2) -> let (s', i', o') = eval (s, i, o) st1 in 
@@ -120,7 +137,13 @@ module Stmt =
 
     (* Statement parser *)
     ostap (
-      parse: empty {failwith "Not implemented yet"}
+      simple_stmt:
+        x:IDENT ":=" e:!(Expr.expr) { Assign (x, e) }
+      | "read" -"(" x:IDENT -")" { Read x }
+      | "write" -"(" e:!(Expr.expr) -")" { Write e };
+      
+      stmt: <s::ss> : !(Util.listBy)[ostap (";")][simple_stmt] {List.fold_left (fun s ss -> Seq (s, ss)) s ss};
+      parse: stmt
     )
       
   end
