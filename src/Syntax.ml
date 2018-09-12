@@ -94,7 +94,16 @@ module Stmt =
 
        Takes a configuration and a statement, and returns another configuration
     *)
-    let eval _ = failwith "Not implemented yet"
+    let rec eval (s, i, o) stmt =
+      match stmt with
+      | Read x -> (match i with
+                  | [] -> failwith "Input is empty; nothing to read"
+                  | v :: is -> (Expr.update x v s, i, o))
+      | Write e -> (s, i, o @ [Expr.eval s e])
+      | Assign (x, e) -> (Expr.update x (Expr.eval s e) s, i, o)
+      | Seq (st1, st2) -> let (s', i', o') = eval (s, i, o) st1 in 
+                          let (s'', i'', o'') = eval (s', i', o') st2 in 
+                          (s'', i'', o'')
                                                          
   end
 
