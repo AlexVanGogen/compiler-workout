@@ -98,7 +98,7 @@ module Stmt =
       match stmt with
       | Read x -> (match i with
                   | [] -> failwith "Input is empty; nothing to read"
-                  | v :: is -> (Expr.update x v s, i, o))
+                  | v :: is -> (Expr.update x v s, is, o))
       | Write e -> (s, i, o @ [Expr.eval s e])
       | Assign (x, e) -> (Expr.update x (Expr.eval s e) s, i, o)
       | Seq (st1, st2) -> let (s', i', o') = eval (s, i, o) st1 in 
