@@ -91,8 +91,8 @@ module Expr =
         [|
           `Lefta , [ostap ("!!"), make_node "!!"];
           `Lefta , [ostap ("&&"), make_node "&&"];
-          `Lefta , [ostap ("<="), make_node "<="; ostap ("<"), make_node "<"; ostap (">="), make_node ">="; ostap (">"), make_node ">"];
-          `Lefta , [ostap ("=="), make_node "=="; ostap ("!="), make_node "!="];
+          `Nona , [ostap ("<="), make_node "<="; ostap ("<"), make_node "<"; ostap (">="), make_node ">="; ostap (">"), make_node ">"];
+          `Nona , [ostap ("=="), make_node "=="; ostap ("!="), make_node "!="];
           `Lefta , [ostap ("+"), make_node "+"; ostap ("-"), make_node "-"];
           `Lefta , [ostap ("*"), make_node "*"; ostap ("/"), make_node "/"; ostap ("%"), make_node "%"];
         |]
