@@ -24,7 +24,26 @@ type config = int list * Stmt.config
 
    Takes a configuration and a program, and returns a configuration as a result
 *)                         
-let rec eval conf prog = failwith "Not yet implemented"
+let rec eval (st, (s, i, o)) p =
+  match p with
+  | [] -> (st, (s, i, o))
+  | ins :: ps -> match ins with
+                    | BINOP op -> (match st with
+                                  | [] -> failwith "Not enough arguments to call binary operation"
+                                  | x :: [] -> failwith "Not enough arguments to call binary operation"
+                                  | y :: x :: xs -> eval ((Language.Expr.eval s (Binop (op, Const x, Const y))) :: xs, (s, i, o)) ps)
+                    | CONST n -> eval (n :: st, (s, i, o)) ps
+                    | READ -> (match i with
+                              | [] -> failwith "Input is empty; nothing to read"
+                              | v :: is -> eval (v :: st, (s, is, o)) ps)
+                    | WRITE -> (match st with
+                               | [] -> failwith "Stack is empty; nothing to write"
+                               | x :: xs -> eval (xs, (s, i, o @ [x])) ps)
+                    | LD x -> eval (s x :: st, (s, i, o)) ps
+                    | ST x -> match st with
+                              | [] -> failwith "Stack is empty; nothing to store"
+                              | v :: xs -> eval (xs, (Language.Expr.update x v s, i, o)) ps
+
 
 (* Top-level evaluation
 

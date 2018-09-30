@@ -44,7 +44,36 @@ module Expr =
        Takes a state and an expression, and returns the value of the expression in 
        the given state.
      *)                                                       
-    let eval _ _ = failwith "Not yet implemented"
+     let toInt b = if b then 1 else 0
+     let toBool n = n <> 0
+     
+     (* returnInt : (a -> a -> bool) -> (a -> a -> int) *)
+     let returnInt op x y = toInt @@ op x y
+     
+     (* makeInt : (bool -> bool -> bool) -> (int -> int -> int) *)
+     let makeInt op x y = toInt @@ op (toBool x) (toBool y)
+     
+     let rec eval s e =
+       match e with
+       | Const n -> n
+       | Var v -> s v
+       | Binop (op, x, y) -> funcOf op (eval s x) (eval s y)
+     and funcOf op = 
+       match op with
+       | "+"  -> ( + )
+       | "-"  -> ( - )
+       | "*"  -> ( * )
+       | "/"  -> ( / )
+       | "%"  -> (mod)
+       | "<"  -> ( returnInt (<) )
+       | "<=" -> ( returnInt (<=) )
+       | ">"  -> ( returnInt (>) )
+       | ">=" -> ( returnInt (>=) )
+       | "==" -> ( returnInt (=) )
+       | "!=" -> ( returnInt (<>) )
+       | "&&" -> ( makeInt (&&) )
+       | "!!" -> ( makeInt (||) )
+       | _ -> failwith "Unknown operator"
 
     (* Expression parser. You can use the following terminals:
 
@@ -52,8 +81,24 @@ module Expr =
          DECIMAL --- a decimal constant [0-9]+ as a string
                                                                                                                   
     *)
-    ostap (                                      
-      parse: empty {failwith "Not yet implemented"}
+    let make_node op = fun x y -> Binop (op, x, y)
+
+    ostap (
+      expr:
+        !(Util.expr
+        (fun x -> x)
+        [|
+          `Lefta , [ostap ("!!"), make_node "!!"];
+          `Lefta , [ostap ("&&"), make_node "&&"];
+          `Nona , [ostap ("<="), make_node "<="; ostap ("<"), make_node "<"; ostap (">="), make_node ">="; ostap (">"), make_node ">"];
+          `Nona , [ostap ("=="), make_node "=="; ostap ("!="), make_node "!="];
+          `Lefta , [ostap ("+"), make_node "+"; ostap ("-"), make_node "-"];
+          `Lefta , [ostap ("*"), make_node "*"; ostap ("/"), make_node "/"; ostap ("%"), make_node "%"];
+        |]
+        primary
+      );
+ 
+      primary: n:DECIMAL {Const n} | x:IDENT {Var x} | -"(" expr -")"
     )
     
   end
@@ -78,11 +123,26 @@ module Stmt =
 
        Takes a configuration and a statement, and returns another configuration
     *)
-    let eval _ _ = failwith "Not yet implemented"
+    let rec eval (s, i, o) stmt =
+      match stmt with
+      | Read x -> (match i with
+                  | [] -> failwith "Input is empty; nothing to read"
+                  | v :: is -> (Expr.update x v s, is, o))
+      | Write e -> (s, i, o @ [Expr.eval s e])
+      | Assign (x, e) -> (Expr.update x (Expr.eval s e) s, i, o)
+      | Seq (st1, st2) -> let (s', i', o') = eval (s, i, o) st1 in 
+                          let (s'', i'', o'') = eval (s', i', o') st2 in 
+                          (s'', i'', o'')
 
     (* Statement parser *)
     ostap (
-      parse: empty {failwith "Not yet implemented"}
+      simple_stmt:
+        x:IDENT ":=" e:!(Expr.expr) { Assign (x, e) }
+      | "read" -"(" x:IDENT -")" { Read x }
+      | "write" -"(" e:!(Expr.expr) -")" { Write e };
+      
+      stmt: <s::ss> : !(Util.listBy)[ostap (";")][simple_stmt] {List.fold_left (fun s ss -> Seq (s, ss)) s ss};
+      parse: stmt
     )
       
   end
