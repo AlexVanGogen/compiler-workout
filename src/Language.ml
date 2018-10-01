@@ -4,7 +4,8 @@
 open GT
 
 (* Opening a library for combinator-based syntax analysis *)
-open Ostap.Combinators
+open Ostap
+open Matcher
        
 (* Simple expressions: syntax and semantics *)
 module Expr =

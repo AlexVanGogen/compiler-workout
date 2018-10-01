@@ -80,7 +80,122 @@ open SM
    Take an environment, a stack machine program, and returns a pair --- the updated environment and the list
    of x86 instructions
 *)
-let compile _ _ = failwith "Not yet implemented"
+let inReg = function | R _ -> true | _ -> false
+
+let suffix = function
+  | "<" -> "l"
+  | "<=" -> "le"
+  | ">" -> "g"
+  | ">=" -> "ge"
+  | "==" -> "e"
+  | "!=" -> "ne"
+
+let rec compile env code = match code with
+  | [] -> (env, [])
+  | inst :: code' ->
+    let (env', is') = (match inst with
+      | BINOP op ->
+        let y, x, _env = env#pop2
+        in (_env#push x, match op with
+            | "+" | "-" | "*" ->
+                if inReg x then [
+                                  Binop (op, y, x)
+                                ] 
+                           else [
+                                  Mov (x, edx);
+                                  Binop (op, y, edx);
+                                  Mov (edx, x)
+                                ]
+            | "/" ->            [
+                                  Mov (x, eax);
+                                  Cltd;
+                                  IDiv y;
+                                  Mov (eax, x)
+                                ]
+            | "%" ->            [
+                                  Mov (x, eax);
+                                  Cltd;
+                                  IDiv y;
+                                  Mov (edx, x)
+                                ]
+            | "<" | "<=" | ">" | ">=" | "==" | "!=" ->
+                if inReg x then [
+                                  Binop ("^", eax, eax);
+                                  Binop ("cmp", y, x);
+                                  Set (suffix op, "%al");
+                                  Mov (eax, x)
+                                ]
+                           else [
+                                  Binop ("^", eax, eax);
+                                  Mov (x, edx);
+                                  Binop ("cmp", y, edx);
+                                  Set (suffix op, "%al");
+                                  Mov (eax, x)
+                                ]
+            | "&&" ->           [
+                                  Mov (L 0, eax);
+                                  Binop ("cmp", eax, x);
+                                  Set ("ne", "%al");
+                                  Mov (L 0, edx);
+                                  Binop ("cmp", edx, y);
+                                  Set ("ne", "%dl");
+                                  Binop ("&&", eax, edx);
+                                  Mov (edx, x)
+                                ]
+            | "!!" ->
+                if inReg x then [
+                                  Binop (op, y, x);
+                                  Mov (L 0, edx);
+                                  Set ("ne", "%dl");
+                                  Mov (edx, x)
+                                ]
+                           else [
+                                  Mov (x, eax);
+                                  Binop (op, y, eax);
+                                  Mov (L 0, edx);
+                                  Set ("ne", "%dl");
+                                  Mov (edx, x)
+                                ]
+          )
+      | CONST n ->
+        let s, _env = env#allocate 
+        in (_env,               [
+                                  Mov (L n, s)
+                                ]
+           )
+      | READ ->
+        let s, _env = env#allocate
+        in (_env,               [
+                                  Call "Lread";
+                                  Mov (eax, s)
+                                ]
+           )
+      | WRITE ->
+        let s, _env = env#pop
+        in (_env,               [
+                                  Push s;
+                                  Call "Lwrite";
+                                  Pop eax
+                                ]
+           )
+      | LD x ->
+        let s, _env = (env#global x)#allocate
+        in (_env,
+                if inReg s then [
+                                  Mov (M (env#loc x), s)
+                                ]
+                           else [
+                                  Mov (M (env#loc x), eax);
+                                  Mov (eax, s)
+                                ]
+           )
+      | ST x ->
+        let s, _env = (env#global x)#pop
+        in (_env,               [
+                                  Mov (s, M (env#loc x))
+                                ]
+           )
+    ) in let (env'', is'') = compile env' code' in (env'', is' @ is'')
 
 (* A set of strings *)           
 module S = Set.Make (String)
