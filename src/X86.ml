@@ -201,6 +201,23 @@ let rec compile env code = match code with
                                   Mov (s, M (env#loc x))
                                 ]
            )
+      | LABEL l -> 
+           (env,                [
+                                  Label l
+                                ]
+           )
+      | JMP ls ->
+           (env,                [
+                                  Jmp ls
+                                ]
+           )
+      | CJMP (c, ls) ->
+        let s, _env = env#pop
+        in (_env,               [
+                                  Binop ("cmp", L 0, s);
+                                  CJmp (c, ls)
+                                ]
+           )
     ) in let (env'', is'') = compile env' code' in (env'', is' @ is'')
 
 

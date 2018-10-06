@@ -16,6 +16,18 @@ open Language
 (* The type for the stack machine program *)                                                               
 type prg = insn list
 
+let f = open_out "file.txt"
+let print_insn ins = match ins with
+  | BINOP s -> Printf.fprintf f "BINOP %s\n" s
+  | CONST i -> Printf.fprintf f "CONST %d\n" i
+  | READ -> Printf.fprintf f "READ\n"
+  | WRITE -> Printf.fprintf f "WRITE\n"
+  | LD s -> Printf.fprintf f "LOAD %s\n" s
+  | ST s -> Printf.fprintf f "STORE %s\n" s
+  | LABEL s -> Printf.fprintf f "LABEL %s\n" s
+  | JMP s -> Printf.fprintf f "JUMP %s\n" s
+  | CJMP (s1, s2) -> Printf.fprintf f "JUMPIF %s %s\n" s1 s2
+
 (* The type for the stack machine configuration: a stack and a configuration from statement
    interpreter
  *)
@@ -35,18 +47,25 @@ let rec eval env (st, (s, i, o)) p =
                     | BINOP op -> (match st with
                                   | [] -> failwith "Not enough arguments to call binary operation"
                                   | x :: [] -> failwith "Not enough arguments to call binary operation"
-                                  | y :: x :: xs -> eval {?} ((Language.Expr.eval s (Binop (op, Const x, Const y))) :: xs, (s, i, o)) ps)
-                    | CONST n -> eval {?} (n :: st, (s, i, o)) ps
+                                  | y :: x :: xs -> eval env ((Language.Expr.eval s (Binop (op, Const x, Const y))) :: xs, (s, i, o)) ps)
+                    | CONST n -> eval env (n :: st, (s, i, o)) ps
                     | READ -> (match i with
                               | [] -> failwith "Input is empty; nothing to read"
-                              | v :: is -> eval {?} (v :: st, (s, is, o)) ps)
+                              | v :: is -> eval env (v :: st, (s, is, o)) ps)
                     | WRITE -> (match st with
                                | [] -> failwith "Stack is empty; nothing to write"
-                               | x :: xs -> eval {?} (xs, (s, i, o @ [x])) ps)
-                    | LD x -> eval {?} (s x :: st, (s, i, o)) ps
-                    | ST x -> match st with
+                               | x :: xs -> eval env (xs, (s, i, o @ [x])) ps)
+                    | LD x -> eval env (s x :: st, (s, i, o)) ps
+                    | ST x -> (match st with
                               | [] -> failwith "Stack is empty; nothing to store"
-                              | v :: xs -> eval {?} (xs, (Language.Expr.update x v s, i, o)) ps
+                              | v :: xs -> eval env (xs, (Language.Expr.update x v s, i, o)) ps)
+                    | LABEL _ -> eval env (st, (s, i, o)) ps
+                    | JMP ls -> eval env (st, (s, i, o)) (env#labeled ls)
+                    | CJMP (c, ls) -> (match st with
+                                      | [] -> (st, (s, i, o))
+                                      | x :: xs -> if ((c = "z") = (x = 0))
+                                                   then eval env (st, (s, i, o)) (env#labeled ls)
+                                                   else eval env (st, (s, i, o)) ps)
 
 
 (* Top-level evaluation
@@ -73,13 +92,30 @@ let run p i =
    stack machine
 *)
 let rec compile =
+  let label_of_int i = Printf.sprintf "L%d" i
+  in
   let rec expr = function
   | Expr.Var   x          -> [LD x]
   | Expr.Const n          -> [CONST n]
   | Expr.Binop (op, x, y) -> expr x @ expr y @ [BINOP op]
   in
-  function
-  | Stmt.Seq (s1, s2)  -> compile s1 @ compile s2
-  | Stmt.Read x        -> [READ; ST x]
-  | Stmt.Write e       -> expr e @ [WRITE]
-  | Stmt.Assign (x, e) -> expr e @ [ST x]
+  let rec compile_with_labels = function
+  | Stmt.Seq (s1, s2)  , l -> let (s1_st, s1_l) = compile_with_labels (s1, l)
+                              in let (s2_st, s2_l) = compile_with_labels (s2, s1_l)
+                              in (s1_st @ s2_st, s2_l)
+  | Stmt.Read x        , l -> [READ; ST x], l
+  | Stmt.Write e       , l -> expr e @ [WRITE], l
+  | Stmt.Assign (x, e) , l -> expr e @ [ST x], l
+  | Stmt.Skip          , l -> [], l
+  | Stmt.If (c, st, sf), l -> let c_st = expr c
+                              in let (true_st, false_l) = compile_with_labels (st, l + 1)
+                              in let (false_st, end_l) = compile_with_labels (sf, false_l + 1)
+                              in let false_label_name = label_of_int l
+                              in let end_label_name = label_of_int false_l
+                              in (c_st @ [CJMP ("z", false_label_name)] @ true_st @ [JMP end_label_name; LABEL false_label_name] @ false_st @ [LABEL end_label_name], end_l)
+  | Stmt.While (c, s)  , l -> let c_st = expr c
+                              in let (loop_st, end_l) = compile_with_labels (s, l + 1)
+                              in let loop_beginning_label_name = label_of_int l
+                              in let end_label_name = label_of_int end_l
+                              in ([LABEL loop_beginning_label_name] @ c_st @ [CJMP ("z", end_label_name)] @ loop_st @ [JMP loop_beginning_label_name; LABEL end_label_name], end_l + 1)
+  in function | s -> let (st, _) = compile_with_labels (s, 0) in (List.iter print_insn st; st)

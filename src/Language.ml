@@ -139,14 +139,21 @@ module Stmt =
       | Seq (st1, st2) -> let (s', i', o') = eval (s, i, o) st1 in 
                           let (s'', i'', o'') = eval (s', i', o') st2 in 
                           (s'', i'', o'')
-
+      | Skip -> (s, i, o)
+      | If (c, st, sf) -> if (Expr.eval s c != 0) then eval (s, i, o) st else eval (s, i, o) sf
+      | While (c, st) -> if (Expr.eval s c == 0) 
+                         then (s, i, o)
+                         else eval (eval (s, i, o) st) (While (c, st))
                                
     (* Statement parser *)
     ostap (
       simple_stmt:
         x:IDENT ":=" e:!(Expr.expr) { Assign (x, e) }
       | "read" -"(" x:IDENT -")" { Read x }
-      | "write" -"(" e:!(Expr.expr) -")" { Write e };
+      | "write" -"(" e:!(Expr.expr) -")" { Write e }
+      | "skip" { Skip }
+      | "if" c:!(Expr.expr) "then" s1:!(stmt) "else" s2:!(stmt) "fi" { If (c, s1, s2) }
+      | "while" c:!(Expr.expr) "do" s:!(stmt) "od" { While (c, s) };
       
       stmt: <s::ss> : !(Util.listBy)[ostap (";")][simple_stmt] {List.fold_left (fun s ss -> Seq (s, ss)) s ss};
       parse: stmt
