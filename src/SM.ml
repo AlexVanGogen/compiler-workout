@@ -129,8 +129,8 @@ let rec compile =
                                 [LABEL loop_beginning_label_name]
                               @ loop_st
                               @ c_st
-                              @ [CJMP ("nz", end_label_name)]
-                              @ [JMP loop_beginning_label_name;
+                              @ [CJMP ("nz", end_label_name);
+                                 JMP loop_beginning_label_name;
                                  LABEL end_label_name]
                               , end_l + 1)
   in function | s -> let (st, _) = compile_with_labels (s, 0) in st
