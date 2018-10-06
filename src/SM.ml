@@ -16,18 +16,6 @@ open Language
 (* The type for the stack machine program *)                                                               
 type prg = insn list
 
-let f = open_out "file.txt"
-let print_insn ins = match ins with
-  | BINOP s -> Printf.fprintf f "BINOP %s\n" s
-  | CONST i -> Printf.fprintf f "CONST %d\n" i
-  | READ -> Printf.fprintf f "READ\n"
-  | WRITE -> Printf.fprintf f "WRITE\n"
-  | LD s -> Printf.fprintf f "LOAD %s\n" s
-  | ST s -> Printf.fprintf f "STORE %s\n" s
-  | LABEL s -> Printf.fprintf f "LABEL %s\n" s
-  | JMP s -> Printf.fprintf f "JUMP %s\n" s
-  | CJMP (s1, s2) -> Printf.fprintf f "JUMPIF %s %s\n" s1 s2
-
 (* The type for the stack machine configuration: a stack and a configuration from statement
    interpreter
  *)
@@ -112,15 +100,37 @@ let rec compile =
                               in let (false_st, end_l) = compile_with_labels (sf, false_l + 1)
                               in let false_label_name = label_of_int l
                               in let end_label_name = label_of_int false_l
-                              in (c_st @ [CJMP ("z", false_label_name)] @ true_st @ [JMP end_label_name; LABEL false_label_name] @ false_st @ [LABEL end_label_name], end_l)
+                              in (
+                                c_st 
+                              @ [CJMP ("z", false_label_name)]
+                              @ true_st
+                              @ [JMP end_label_name;
+                                 LABEL false_label_name]
+                              @ false_st
+                              @ [LABEL end_label_name]
+                              , end_l)
   | Stmt.While (c, s)  , l -> let c_st = expr c
                               in let (loop_st, end_l) = compile_with_labels (s, l + 1)
                               in let loop_beginning_label_name = label_of_int l
                               in let end_label_name = label_of_int end_l
-                              in ([LABEL loop_beginning_label_name] @ c_st @ [CJMP ("z", end_label_name)] @ loop_st @ [JMP loop_beginning_label_name; LABEL end_label_name], end_l + 1)
+                              in (
+                                [LABEL loop_beginning_label_name]
+                              @ c_st
+                              @ [CJMP ("z", end_label_name)]
+                              @ loop_st
+                              @ [JMP loop_beginning_label_name;
+                                 LABEL end_label_name]
+                              , end_l + 1)
   | Stmt.Until (c, s)  , l -> let c_st = expr c
                               in let (loop_st, end_l) = compile_with_labels (s, l + 1)
                               in let loop_beginning_label_name = label_of_int l
                               in let end_label_name = label_of_int end_l
-                              in ([LABEL loop_beginning_label_name] @ loop_st @ c_st @ [CJMP ("nz", end_label_name)] @ [JMP loop_beginning_label_name; LABEL end_label_name], end_l + 1)
-  in function | s -> let (st, _) = compile_with_labels (s, 0) in (List.iter print_insn st; st)
+                              in (
+                                [LABEL loop_beginning_label_name]
+                              @ loop_st
+                              @ c_st
+                              @ [CJMP ("nz", end_label_name)]
+                              @ [JMP loop_beginning_label_name;
+                                 LABEL end_label_name]
+                              , end_l + 1)
+  in function | s -> let (st, _) = compile_with_labels (s, 0) in st
