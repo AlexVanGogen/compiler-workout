@@ -118,4 +118,9 @@ let rec compile =
                               in let loop_beginning_label_name = label_of_int l
                               in let end_label_name = label_of_int end_l
                               in ([LABEL loop_beginning_label_name] @ c_st @ [CJMP ("z", end_label_name)] @ loop_st @ [JMP loop_beginning_label_name; LABEL end_label_name], end_l + 1)
+  | Stmt.Until (c, s)  , l -> let c_st = expr c
+                              in let (loop_st, end_l) = compile_with_labels (s, l + 1)
+                              in let loop_beginning_label_name = label_of_int l
+                              in let end_label_name = label_of_int end_l
+                              in ([LABEL loop_beginning_label_name] @ loop_st @ c_st @ [CJMP ("nz", end_label_name)] @ [JMP loop_beginning_label_name; LABEL end_label_name], end_l + 1)
   in function | s -> let (st, _) = compile_with_labels (s, 0) in (List.iter print_insn st; st)

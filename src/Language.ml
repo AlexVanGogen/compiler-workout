@@ -118,7 +118,7 @@ module Stmt =
     (* empty statement                  *) | Skip
     (* conditional                      *) | If     of Expr.t * t * t
     (* loop with a pre-condition        *) | While  of Expr.t * t
-    (* loop with a post-condition       *) (* add yourself *)  with show
+    (* loop with a post-condition       *) | Until  of Expr.t * t  with show
                                                                     
     (* The type of configuration: a state, an input stream, an output stream *)
     type config = Expr.state * int list * int list 
@@ -144,6 +144,10 @@ module Stmt =
       | While (c, st) -> if (Expr.eval s c == 0) 
                          then (s, i, o)
                          else eval (eval (s, i, o) st) (While (c, st))
+      | Until (c, st) -> let (s', i', o') = eval (s, i, o) st
+                         in if (Expr.eval s' c <> 0) 
+                            then (s', i', o')
+                            else eval (s', i', o') (Until (c, st))
                                
     (* Statement parser *)
     ostap (
@@ -152,9 +156,20 @@ module Stmt =
       | "read" -"(" x:IDENT -")" { Read x }
       | "write" -"(" e:!(Expr.expr) -")" { Write e }
       | "skip" { Skip }
-      | "if" c:!(Expr.expr) "then" s1:!(stmt) "else" s2:!(stmt) "fi" { If (c, s1, s2) }
-      | "while" c:!(Expr.expr) "do" s:!(stmt) "od" { While (c, s) };
-      
+      | if_stmt
+      | "while" c:!(Expr.expr) "do" s:!(stmt) "od" { While (c, s) }
+      | "for" s1:!(stmt) -"," c:!(Expr.expr) -"," s2:!(stmt) "do" s:!(stmt) "od" { Seq (s1, While (c, Seq (s, s2))) }
+      | "repeat" s:!(stmt) "until" c:!(Expr.expr) { Until (c, s) };
+
+      if_stmt:
+        "if" c:!(Expr.expr) "then" s1:!(stmt) "fi" { If (c, s1, Skip) }
+      | "if" c:!(Expr.expr) "then" s1:!(stmt) s2:!(else_stmt) "fi" { If (c, s1, s2) };
+
+      else_stmt:
+        "else" s:!(stmt) { s }
+      | "elif" c:!(Expr.expr) "then" s1:!(stmt) s2:!(else_stmt) { If (c, s1, s2) }
+      | "elif" c:!(Expr.expr) "then" s1:!(stmt) { If (c, s1, Skip) };        
+
       stmt: <s::ss> : !(Util.listBy)[ostap (";")][simple_stmt] {List.fold_left (fun s ss -> Seq (s, ss)) s ss};
       parse: stmt
     )
