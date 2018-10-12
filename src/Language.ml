@@ -4,7 +4,8 @@
 open GT
 
 (* Opening a library for combinator-based syntax analysis *)
-open Ostap.Combinators
+open Ostap
+open Matcher
 
 (* States *)
 module State =
@@ -150,11 +151,49 @@ module Stmt =
 
        which returns a list of formal parameters and a body for given definition
     *)
-    let rec eval _ = failwith "Not Implemented Yet"
+    let rec eval (s, i, o) stmt =
+      match stmt with
+      | Read x -> (match i with
+                  | [] -> failwith "Input is empty; nothing to read"
+                  | v :: is -> (Expr.update x v s, is, o))
+      | Write e -> (s, i, o @ [Expr.eval s e])
+      | Assign (x, e) -> (Expr.update x (Expr.eval s e) s, i, o)
+      | Seq (st1, st2) -> let (s', i', o') = eval (s, i, o) st1 in 
+                          let (s'', i'', o'') = eval (s', i', o') st2 in 
+                          (s'', i'', o'')
+      | Skip -> (s, i, o)
+      | If (c, st, sf) -> if (Expr.eval s c != 0) then eval (s, i, o) st else eval (s, i, o) sf
+      | While (c, st) -> if (Expr.eval s c == 0) 
+                         then (s, i, o)
+                         else eval (eval (s, i, o) st) (While (c, st))
+      | Until (c, st) -> let (s', i', o') = eval (s, i, o) st
+                         in if (Expr.eval s' c <> 0) 
+                            then (s', i', o')
+                            else eval (s', i', o') (Until (c, st))  
                                 
     (* Statement parser *)
     ostap (                                      
-      parse: empty {failwith "Not yet implemented"}
+      simple_stmt:
+        x:IDENT ":=" e:!(Expr.expr) { Assign (x, e) }
+      | "read" -"(" x:IDENT -")" { Read x }
+      | "write" -"(" e:!(Expr.expr) -")" { Write e }
+      | "skip" { Skip }
+      | if_stmt
+      | "while" c:!(Expr.expr) "do" s:!(stmt) "od" { While (c, s) }
+      | "for" s1:!(stmt) -"," c:!(Expr.expr) -"," s2:!(stmt) "do" s:!(stmt) "od" { Seq (s1, While (c, Seq (s, s2))) }
+      | "repeat" s:!(stmt) "until" c:!(Expr.expr) { Until (c, s) };
+
+      if_stmt:
+        "if" c:!(Expr.expr) "then" s1:!(stmt) "fi" { If (c, s1, Skip) }
+      | "if" c:!(Expr.expr) "then" s1:!(stmt) s2:!(else_stmt) "fi" { If (c, s1, s2) };
+
+      else_stmt:
+        "else" s:!(stmt) { s }
+      | "elif" c:!(Expr.expr) "then" s1:!(stmt) s2:!(else_stmt) { If (c, s1, s2) }
+      | "elif" c:!(Expr.expr) "then" s1:!(stmt) { If (c, s1, Skip) };        
+
+      stmt: <s::ss> : !(Util.listBy)[ostap (";")][simple_stmt] {List.fold_left (fun s ss -> Seq (s, ss)) s ss};
+      parse: stmt
     )
       
   end
