@@ -31,32 +31,32 @@ type config = (prg * State.t) list * int list * Stmt.config
    Takes an environment, a configuration and a program, and returns a configuration as a result. The
    environment is used to locate a label to jump to (via method env#labeled <label_name>)
 *)                         
-let rec eval env (st, (s, i, o)) p =
+let rec eval env (cst, st, (s, i, o)) p =
   match p with
-  | [] -> (st, (s, i, o))
+  | [] -> (cst, st, (s, i, o))
   | ins :: ps -> match ins with
                     | BINOP op -> (match st with
                                   | [] -> failwith "Not enough arguments to call binary operation"
                                   | x :: [] -> failwith "Not enough arguments to call binary operation"
-                                  | y :: x :: xs -> eval env ((Language.Expr.eval s (Binop (op, Const x, Const y))) :: xs, (s, i, o)) ps)
-                    | CONST n -> eval env (n :: st, (s, i, o)) ps
+                                  | y :: x :: xs -> eval env (cst, (Language.Expr.eval s (Binop (op, Const x, Const y))) :: xs, (s, i, o)) ps)
+                    | CONST n -> eval env (cst, n :: st, (s, i, o)) ps
                     | READ -> (match i with
                               | [] -> failwith "Input is empty; nothing to read"
-                              | v :: is -> eval env (v :: st, (s, is, o)) ps)
+                              | v :: is -> eval env (cst, v :: st, (s, is, o)) ps)
                     | WRITE -> (match st with
                                | [] -> failwith "Stack is empty; nothing to write"
-                               | x :: xs -> eval env (xs, (s, i, o @ [x])) ps)
-                    | LD x -> eval env (s x :: st, (s, i, o)) ps
+                               | x :: xs -> eval env (cst, xs, (s, i, o @ [x])) ps)
+                    | LD x -> eval env (cst, (Language.State.eval s x) :: st, (s, i, o)) ps
                     | ST x -> (match st with
                               | [] -> failwith "Stack is empty; nothing to store"
-                              | v :: xs -> eval env (xs, (Language.Expr.update x v s, i, o)) ps)
-                    | LABEL _ -> eval env (st, (s, i, o)) ps
-                    | JMP ls -> eval env (st, (s, i, o)) (env#labeled ls)
+                              | v :: xs -> eval env (cst, xs, (Language.State.update x v s, i, o)) ps)
+                    | LABEL _ -> eval env (cst, st, (s, i, o)) ps
+                    | JMP ls -> eval env (cst, st, (s, i, o)) (env#labeled ls)
                     | CJMP (c, ls) -> (match st with
-                                      | [] -> (st, (s, i, o))
+                                      | [] -> (cst, st, (s, i, o))
                                       | x :: xs -> if ((c = "z") = (x = 0))
-                                                   then eval env (st, (s, i, o)) (env#labeled ls)
-                                                   else eval env (st, (s, i, o)) ps)
+                                                   then eval env (cst, st, (s, i, o)) (env#labeled ls)
+                                                   else eval env (cst, st, (s, i, o)) ps)
 
 
 (* Top-level evaluation
@@ -82,7 +82,7 @@ let run p i =
    Takes a program in the source language and returns an equivalent program for the
    stack machine
 *)
-let compile _ = failwith "Not Implemented Yet"let rec compile =
+let rec compile =
 let label_of_int i = Printf.sprintf "L%d" i
 in
 let rec expr = function
@@ -124,7 +124,7 @@ let rec compile_with_labels = function
                             @ [JMP loop_beginning_label_name;
                                LABEL end_label_name]
                             , end_l + 1)
-| Stmt.Until (c, s)  , l -> let c_st = expr c
+| Stmt.Repeat (s, c) , l -> let c_st = expr c
                             in let (loop_st, end_l) = compile_with_labels (s, l + 1)
                             in let loop_beginning_label_name = label_of_int l
                             in let end_label_name = label_of_int end_l
@@ -136,4 +136,4 @@ let rec compile_with_labels = function
                                JMP loop_beginning_label_name;
                                LABEL end_label_name]
                             , end_l + 1)
-in function | s -> let (st, _) = compile_with_labels (s, 0) in st
+in function | (defs, s) -> let (st, _) = compile_with_labels (s, 0) in st

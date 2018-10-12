@@ -56,7 +56,7 @@ module Expr =
         +, -                 --- addition, subtraction
         *, /, %              --- multiplication, division, reminder
     *)
-      
+
     (* Expression evaluator
 
           val eval : state -> t -> int
@@ -116,11 +116,18 @@ module Expr =
       primary:
         n:DECIMAL {Const n}
       | x:IDENT   {Var x}
-      | -"(" parse -")"
+      | -"(" parse -")";
+
+      expr: parse
     )
     
   end
-                    
+     
+  
+let unwrap xs = match xs with
+  | None -> []
+  | Some s -> s
+
 (* Simple statements: syntax and sematics *)
 module Stmt =
   struct
@@ -151,28 +158,34 @@ module Stmt =
 
        which returns a list of formal parameters and a body for given definition
     *)
-    let rec eval (s, i, o) stmt =
+    let rec eval env (s, i, o) stmt =
       match stmt with
       | Read x -> (match i with
                   | [] -> failwith "Input is empty; nothing to read"
-                  | v :: is -> (Expr.update x v s, is, o))
+                  | v :: is -> (State.update x v s, is, o))
       | Write e -> (s, i, o @ [Expr.eval s e])
-      | Assign (x, e) -> (Expr.update x (Expr.eval s e) s, i, o)
-      | Seq (st1, st2) -> let (s', i', o') = eval (s, i, o) st1 in 
-                          let (s'', i'', o'') = eval (s', i', o') st2 in 
+      | Assign (x, e) -> (State.update x (Expr.eval s e) s, i, o)
+      | Seq (st1, st2) -> let (s', i', o') = eval env (s, i, o) st1 in 
+                          let (s'', i'', o'') = eval env (s', i', o') st2 in 
                           (s'', i'', o'')
       | Skip -> (s, i, o)
-      | If (c, st, sf) -> if (Expr.eval s c != 0) then eval (s, i, o) st else eval (s, i, o) sf
+      | If (c, st, sf) -> if (Expr.eval s c != 0) then eval env (s, i, o) st else eval env (s, i, o) sf
       | While (c, st) -> if (Expr.eval s c == 0) 
                          then (s, i, o)
-                         else eval (eval (s, i, o) st) (While (c, st))
-      | Until (c, st) -> let (s', i', o') = eval (s, i, o) st
-                         in if (Expr.eval s' c <> 0) 
-                            then (s', i', o')
-                            else eval (s', i', o') (Until (c, st))  
+                         else eval env (eval env (s, i, o) st) (While (c, st))
+      | Repeat (st, c) -> let (s', i', o') = eval env (s, i, o) st
+                          in if (Expr.eval s' c <> 0) 
+                             then (s', i', o')
+                             else eval env (s', i', o') (Repeat (st, c))  
                                 
     (* Statement parser *)
-    ostap (                                      
+    ostap (                          
+      
+      (* args_list: <p::ps> : !(Util.listBy)[ostap (",")][Expr.expr] {List.fold_left (fun x y -> x::y::[]) p ps};   *)
+      args_list: 
+        s:!(Expr.expr) { s :: [] }
+      | s:!(Expr.expr) -"," ss:!(args_list) { s :: ss };
+
       simple_stmt:
         x:IDENT ":=" e:!(Expr.expr) { Assign (x, e) }
       | "read" -"(" x:IDENT -")" { Read x }
@@ -181,7 +194,8 @@ module Stmt =
       | if_stmt
       | "while" c:!(Expr.expr) "do" s:!(stmt) "od" { While (c, s) }
       | "for" s1:!(stmt) -"," c:!(Expr.expr) -"," s2:!(stmt) "do" s:!(stmt) "od" { Seq (s1, While (c, Seq (s, s2))) }
-      | "repeat" s:!(stmt) "until" c:!(Expr.expr) { Until (c, s) };
+      | "repeat" s:!(stmt) "until" c:!(Expr.expr) { Repeat (s, c) }
+      | fname:IDENT -"(" al:!(args_list)? -")" { Call (fname, unwrap al) };
 
       if_stmt:
         "if" c:!(Expr.expr) "then" s1:!(stmt) "fi" { If (c, s1, Skip) }
@@ -191,7 +205,7 @@ module Stmt =
         "else" s:!(stmt) { s }
       | "elif" c:!(Expr.expr) "then" s1:!(stmt) s2:!(else_stmt) { If (c, s1, s2) }
       | "elif" c:!(Expr.expr) "then" s1:!(stmt) { If (c, s1, Skip) };        
-
+   
       stmt: <s::ss> : !(Util.listBy)[ostap (";")][simple_stmt] {List.fold_left (fun s ss -> Seq (s, ss)) s ss};
       parse: stmt
     )
@@ -205,8 +219,13 @@ module Definition =
     (* The type for a definition: name, argument list, local variables, body *)
     type t = string * (string list * string list * Stmt.t)
 
-    ostap (                                      
-      parse: empty {failwith "Not yet implemented"}
+    ostap (                     
+      params_list:
+        x:IDENT { x :: [] }
+      | x:IDENT -"," xs:params_list { x :: xs };
+
+      local_scope: "local" l:!(params_list) { l };
+      parse: "fun" x:IDENT -"(" p:!(params_list)? -")" ls:!(local_scope)? -"{" s:!(Stmt.stmt) -"}" { (x, (unwrap p, unwrap ls, s)) }
     )
 
   end
