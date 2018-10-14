@@ -19,6 +19,21 @@ open Language
 (* The type for the stack machine program *)                                                               
 type prg = insn list
 
+(* let f = open_out "file.txt"
+let print_insn ins = match ins with
+  | BINOP s -> Printf.fprintf f "BINOP %s\n" s
+  | CONST i -> Printf.fprintf f "CONST %d\n" i
+  | READ -> Printf.fprintf f "READ\n"
+  | WRITE -> Printf.fprintf f "WRITE\n"
+  | LD s -> Printf.fprintf f "LOAD %s\n" s
+  | ST s -> Printf.fprintf f "STORE %s\n" s
+  | LABEL s -> Printf.fprintf f "LABEL %s\n" s
+  | JMP s -> Printf.fprintf f "JUMP %s\n" s
+  | CJMP (s1, s2) -> Printf.fprintf f "JUMPIF %s %s\n" s1 s2
+  | BEGIN (a, l) -> Printf.fprintf f "BEGIN (%d %d)\n" (List.length a) (List.length l)
+  | END -> Printf.fprintf f "END\n"
+  | CALL fname -> Printf.fprintf f "CALL %s\n" fname *)
+
 (* The type for the stack machine configuration: control stack, stack and configuration from statement
    interpreter
  *)
@@ -38,7 +53,7 @@ let rec eval env (cst, st, (s, i, o)) p =
                     | BINOP op -> (match st with
                                   | [] -> failwith "Not enough arguments to call binary operation"
                                   | x :: [] -> failwith "Not enough arguments to call binary operation"
-                                  | y :: x :: xs -> eval env (cst, (Language.Expr.eval s (Binop (op, Const x, Const y))) :: xs, (s, i, o)) ps)
+                                  | y :: x :: xs -> eval env (cst, (Expr.eval s (Expr.Binop (op, Expr.Const x, Expr.Const y))) :: xs, (s, i, o)) ps)
                     | CONST n -> eval env (cst, n :: st, (s, i, o)) ps
                     | READ -> (match i with
                               | [] -> failwith "Input is empty; nothing to read"
@@ -46,7 +61,7 @@ let rec eval env (cst, st, (s, i, o)) p =
                     | WRITE -> (match st with
                                | [] -> failwith "Stack is empty; nothing to write"
                                | x :: xs -> eval env (cst, xs, (s, i, o @ [x])) ps)
-                    | LD x -> eval env (cst, (Language.State.eval s x) :: st, (s, i, o)) ps
+                    | LD x -> eval env (cst, (State.eval s x) :: st, (s, i, o)) ps
                     | ST x -> (match st with
                               | [] -> failwith "Stack is empty; nothing to store"
                               | v :: xs -> eval env (cst, xs, (Language.State.update x v s, i, o)) ps)
@@ -57,7 +72,16 @@ let rec eval env (cst, st, (s, i, o)) p =
                                       | x :: xs -> if ((c = "z") = (x = 0))
                                                    then eval env (cst, st, (s, i, o)) (env#labeled ls)
                                                    else eval env (cst, st, (s, i, o)) ps)
-
+                    | BEGIN (a, l) -> let len = List.length a
+                                      in let z = take len st
+                                      in let st' = drop len st
+                                      in let s' = State.push_scope s (a @ l)
+                                      in let s'' = bimap (fun x v -> State.update v x s') z a s'
+                                      in eval env (cst, st', (s'', i, o)) ps
+                    | END -> (match cst with
+                             | [] -> ([], st, (s, i, o))
+                             | (p', s')::cst -> eval env (cst, st, (State.drop_scope s s', i, o)) p')
+                    | CALL fname -> eval env ((ps, s)::cst, st, (s, i, o)) (env#labeled fname)
 
 (* Top-level evaluation
 
@@ -84,6 +108,7 @@ let run p i =
 *)
 let rec compile =
 let label_of_int i = Printf.sprintf "L%d" i
+in let label_of_proc fname args = Printf.sprintf "%s#%d" fname (List.length args)
 in
 let rec expr = function
 | Expr.Var   x          -> [LD x]
@@ -136,4 +161,16 @@ let rec compile_with_labels = function
                                JMP loop_beginning_label_name;
                                LABEL end_label_name]
                             , end_l + 1)
-in function | (defs, s) -> let (st, _) = compile_with_labels (s, 0) in st
+| Stmt.Call (s, es)  , l ->  (List.concat (List.map expr es)
+                            @ [CALL (label_of_proc s es)], l)
+in function | (defs, s) -> let (st, lbl) = compile_with_labels (s, 0)
+                           in let code =
+                            List.concat (List.map (fun (fname, (a, l, stmt)) -> let (st', lbl') = compile_with_labels (stmt, lbl) in
+                              [JMP "MAIN";
+                               LABEL (label_of_proc fname a);
+                               BEGIN (a, l)]
+                            @ st'
+                            @ [END]) defs)
+                            @ [LABEL "MAIN"]
+                            @ st
+                           in code

@@ -18,7 +18,7 @@ module State =
     let empty =
       let e x = failwith (Printf.sprintf "Undefined variable: %s" x) in
       {g = e; l = e; scope = []}
-
+    
     (* Update: non-destructively "modifies" the state s by binding the variable x 
        to value v and returns the new state w.r.t. a scope
     *)
@@ -123,7 +123,24 @@ module Expr =
     
   end
      
-  
+
+(* Helpers *)
+let rec take n xs = match n, xs with
+  | 0, _ -> []
+  | n, [] -> failwith "Not enough values to take"
+  | n, x::xs -> x :: take (n - 1) xs
+
+let rec drop n xs = match n, xs with
+  | 0, xs -> xs
+  | n, [] -> failwith "Not enough values to drop"
+  | n, _::xs -> drop (n - 1) xs
+
+let rec bimap f xs ys default = match xs, ys with
+  | [], [] -> default
+  | x::[], y::[] -> f x y
+  | x::xs, y::ys -> bimap f xs ys default
+  | _, _ -> failwith "Lists have different length"
+
 let unwrap xs = match xs with
   | None -> []
   | Some s -> s
@@ -176,12 +193,17 @@ module Stmt =
       | Repeat (st, c) -> let (s', i', o') = eval env (s, i, o) st
                           in if (Expr.eval s' c <> 0) 
                              then (s', i', o')
-                             else eval env (s', i', o') (Repeat (st, c))  
-                                
+                             else eval env (s', i', o') (Repeat (st, c))
+      | Call (fname, es) -> let (a, l, stmts) = env#definition fname
+                            in let vs = List.map (Expr.eval s) es
+                            in let s' = State.push_scope s (a @ l)
+                            in let s'' = bimap (fun x v -> State.update v x s') vs a s'
+                            in let (s''', i', o') = eval env (s'', i, o) stmts
+                            in (State.drop_scope s''' s, i', o')
+
     (* Statement parser *)
     ostap (                          
       
-      (* args_list: <p::ps> : !(Util.listBy)[ostap (",")][Expr.expr] {List.fold_left (fun x y -> x::y::[]) p ps};   *)
       args_list: 
         s:!(Expr.expr) { s :: [] }
       | s:!(Expr.expr) -"," ss:!(args_list) { s :: ss };
