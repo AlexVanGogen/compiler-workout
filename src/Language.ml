@@ -26,6 +26,11 @@ module State =
       let u x v s = fun y -> if x = y then v else s y in
       if List.mem x s.scope then {s with l = u x v s.l} else {s with g = u x v s.g}
 
+    let rec update_list xs vs s = match xs, vs with
+      | [], [] -> s
+      | x::xs, v::vs -> update_list xs vs (update x v s)
+      | _, _ -> failwith "Lists have different length"
+
     (* Evals a variable in a state w.r.t. a scope *)
     let eval s x = (if List.mem x s.scope then s.l else s.g) x
 
@@ -36,7 +41,22 @@ module State =
     let leave st st' = {st' with g = st.g}
 
   end
-    
+
+(* Helpers *)
+let rec take n xs = match n, xs with
+| 0, _ -> []
+| n, [] -> failwith "Not enough values to take"
+| n, x::xs -> x :: take (n - 1) xs
+
+let rec drop n xs = match n, xs with
+| 0, xs -> xs
+| n, [] -> failwith "Not enough values to drop"
+| n, _::xs -> drop (n - 1) xs
+
+let unwrap xs = match xs with
+| None -> []
+| Some s -> s
+
 (* Simple expressions: syntax and semantics *)
 module Expr =
   struct
@@ -74,7 +94,39 @@ module Expr =
        which takes an environment (of the same type), a name of the function, a list of actual parameters and a configuration, 
        an returns resulting configuration
     *)                                                       
-    let rec eval env ((st, i, o, r) as conf) expr = failwith "Not implemented"
+    let to_func op =
+      let bti   = function true -> 1 | _ -> 0 in
+      let itb b = b <> 0 in
+      let (|>) f g   = fun x y -> f (g x y) in
+      match op with
+      | "+"  -> (+)
+      | "-"  -> (-)
+      | "*"  -> ( * )
+      | "/"  -> (/)
+      | "%"  -> (mod)
+      | "<"  -> bti |> (< )
+      | "<=" -> bti |> (<=)
+      | ">"  -> bti |> (> )
+      | ">=" -> bti |> (>=)
+      | "==" -> bti |> (= )
+      | "!=" -> bti |> (<>)
+      | "&&" -> fun x y -> bti (itb x && itb y)
+      | "!!" -> fun x y -> bti (itb x || itb y)
+      | _    -> failwith (Printf.sprintf "Unknown binary operator %s" op)    
+
+    let combine_states (_, ret1) (conf2, ret2) = (conf2, ret1::ret2)
+
+    let rec get_args env ((st, i, o, r) as conf) exprs = match exprs with
+      | [] -> (conf, [])
+      | expr::es -> let (st', i', o', Some r') = eval env conf expr in combine_states (conf, r') (get_args env (st', i', o', Some r') es)
+    and eval env ((st, i, o, r) as conf) expr =
+      match expr with
+      | Const n -> (st, i, o, Some n)
+      | Var x   -> (st, i, o, Some (State.eval st x))
+      | Binop (op, x, y) -> let (_, _, _, Some a) = eval env conf x
+                            in let (st'', i'', o'', Some b) = eval env conf y
+                            in (st'', i'', o'', Some (to_func op a b))
+| Call (fname, es) -> let (conf', rets) = get_args env conf es in env#definition env fname rets conf'
          
     (* Expression parser. You can use the following terminals:
 
@@ -82,7 +134,33 @@ module Expr =
          DECIMAL --- a decimal constant [0-9]+ as a string                                                                                                                  
     *)
     ostap (                                      
-      parse: empty {failwith "Not implemented"}
+      parse:
+      !(Ostap.Util.expr 
+               (fun x -> x)
+         (Array.map (fun (a, s) -> a, 
+                             List.map  (fun s -> ostap(- $(s)), (fun x y -> Binop (s, x, y))) s
+                          ) 
+                [|                
+                  `Lefta, ["!!"];
+                  `Lefta, ["&&"];
+                  `Nona , ["=="; "!="; "<="; "<"; ">="; ">"];
+                  `Lefta, ["+" ; "-"];
+                  `Lefta, ["*" ; "/"; "%"];
+                |] 
+         )
+         primary);
+        
+        args_list: 
+          s:!(expr) -"," ss:!(args_list) { s :: ss }
+        | s:!(expr) { s :: [] };
+  
+        primary:
+          fname:IDENT -"(" al:!(args_list)? -")" { Call (fname, unwrap al) }
+        | n:DECIMAL {Const n}
+        | x:IDENT   {Var x}
+        | -"(" parse -")";
+  
+        expr: parse
     )
     
   end
@@ -111,11 +189,58 @@ module Stmt =
        Takes an environment, a configuration and a statement, and returns another configuration. The 
        environment is the same as for expressions
     *)
-    let rec eval env ((st, i, o, r) as conf) k stmt = failwith "Not implemnted"
+    let meta_op s1 s2 = match s2 with
+      | Skip -> s1
+      | _ -> Seq (s1, s2)
+      
+    let rec eval env ((st, i, o, r) as conf) k stmt =
+      match stmt, k with
+      | Read x, k -> (match i with
+                     | [] -> failwith "Input is empty; nothing to read"
+                     | v :: is -> eval env (State.update x v st, is, o, None) Skip k)
+      | Write e, k -> let (s', i', o', Some n') = Expr.eval env conf e in eval env (s', i', o' @ [n'], None) Skip k
+      | Assign (x, e), k -> let (s', i', o', Some n') = Expr.eval env conf e in eval env (State.update x n' s', i', o', None) Skip k
+      | Seq (st1, st2), k -> eval env conf (meta_op st2 k) st1
+      | Skip, k -> (match k with | Skip -> conf | k -> eval env conf Skip k)
+      | If (c, st, sf), k -> let (s', i', o', Some n') = Expr.eval env conf c in eval env (s', i', o', None) k (if n' <> 0 then st else sf)
+      | While (c, st), k -> let (s', i', o', Some n') = Expr.eval env conf c in (if n' <> 0 then eval env (s', i', o', None) (meta_op (While (c, st)) k) st else eval env (s', i', o', None) Skip k)
+      | Repeat (st, c), k -> let (s', i', o', n') = eval env conf Skip st in let (s'', i'', o'', Some n'') = Expr.eval env (s', i', o', n') c in (if n'' <> 0 then eval env (s'', i'', o'', None) Skip k else eval env (s'', i'', o'', None) k (Repeat (st, c)))
+      | Call (fname, es), k -> let (s', i', o', n') = Expr.eval env conf (Expr.Call (fname, es)) in eval env (s', i', o', n') k Skip
+      | Return ret, k -> (match ret with | None -> conf | Some ret -> Expr.eval env conf ret)
          
     (* Statement parser *)
     ostap (
-      parse: empty {failwith "Not implemented"}
+      args_list: 
+        s:!(Expr.expr) -"," ss:!(args_list) { s :: ss }
+      | s:!(Expr.expr) { s :: [] };
+
+      simple_stmt:
+        x:IDENT ":=" e:!(Expr.expr) { Assign (x, e) }
+      | "read" -"(" x:IDENT -")" { Read x }
+      | "write" -"(" e:!(Expr.expr) -")" { Write e }
+      | "skip" { Skip }
+      | if_stmt
+      | "while" c:!(Expr.expr) "do" s:!(stmt) "od" { While (c, s) }
+      | "for" s1:!(stmt) -"," c:!(Expr.expr) -"," s2:!(stmt) "do" s:!(stmt) "od" { Seq (s1, While (c, Seq (s, s2))) }
+      | "repeat" s:!(stmt) "until" c:!(Expr.expr) { Repeat (s, c) }
+      | fname:IDENT -"(" al:!(args_list)? -")" { Call (fname, unwrap al) }
+      | return_stmt;
+
+      if_stmt:
+        "if" c:!(Expr.expr) "then" s1:!(stmt) "fi" { If (c, s1, Skip) }
+      | "if" c:!(Expr.expr) "then" s1:!(stmt) s2:!(else_stmt) "fi" { If (c, s1, s2) };
+
+      else_stmt:
+        "else" s:!(stmt) { s }
+      | "elif" c:!(Expr.expr) "then" s1:!(stmt) s2:!(else_stmt) { If (c, s1, s2) }
+      | "elif" c:!(Expr.expr) "then" s1:!(stmt) { If (c, s1, Skip) };        
+   
+      return_stmt:
+        "return" ret:!(Expr.expr) { Return (Some ret) }
+      | "return" { Return None };
+
+      stmt: <s::ss> : !(Util.listBy)[ostap (";")][simple_stmt] {List.fold_left (fun s ss -> Seq (s, ss)) s ss};
+      parse: stmt
     )
       
   end
@@ -128,7 +253,12 @@ module Definition =
     type t = string * (string list * string list * Stmt.t)
 
     ostap (     
-      parse: empty {failwith "Not implemented"}
+      arg  : IDENT;
+      parse: %"fun" name:IDENT "(" args:!(Util.list0 arg) ")"
+         locs:(%"local" !(Util.list arg))?
+        "{" body:!(Stmt.parse) "}" {
+        (name, (args, (match locs with None -> [] | Some l -> l), body))
+      }
     )
 
   end
