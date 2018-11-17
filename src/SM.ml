@@ -69,6 +69,22 @@ let rec eval env ((cstack, stack, ((st, i, o, r) as c)) as conf) prg =
                            | [] -> ([], stack, c)
                            | (p', s')::cstack -> eval env (cstack, stack, (State.leave st s', i, o, r)) p')
 
+let f = open_out "file.txt"
+let print_insn ins = match ins with
+  | BINOP s -> Printf.fprintf f "BINOP %s\n" s
+  | CONST i -> Printf.fprintf f "CONST %d\n" i
+  | READ -> Printf.fprintf f "READ\n"
+  | WRITE -> Printf.fprintf f "WRITE\n"
+  | LD s -> Printf.fprintf f "LOAD %s\n" s
+  | ST s -> Printf.fprintf f "STORE %s\n" s
+  | LABEL s -> Printf.fprintf f "LABEL %s\n" s
+  | JMP s -> Printf.fprintf f "JUMP %s\n" s
+  | CJMP (s1, s2) -> Printf.fprintf f "JUMPIF %s %s\n" s1 s2
+  | BEGIN (s, al, ll) -> Printf.fprintf f "BEGIN %s\n" s
+  | END -> Printf.fprintf f "END\n"
+  | CALL (s, n, b) -> Printf.fprintf f "CALL %s %d %b\n" s n b
+  | RET b -> Printf.fprintf f "RET %b\n" b
+
 (* Top-level evaluation
 
      val run : prg -> int list -> int list
@@ -94,7 +110,7 @@ let run p i =
 *)
 let rec compile =
   let label_of_int i = Printf.sprintf "L%d" i
-  in let label_of_proc fname args = Printf.sprintf "%s#%d" fname (List.length args)
+  in let label_of_proc fname args = Printf.sprintf "%s__%d" fname (List.length args)
   in
   let rec expr = function
   | Expr.Var   x, l          -> [LD x]
@@ -154,12 +170,13 @@ let rec compile =
   | Stmt.Return (Some ret), l -> (expr (ret, l)) @ [RET true], l
   in function | (defs, s) -> let (st, lbl) = compile_with_labels (s, 0)
                              in let code =
-                              List.concat (List.map (fun (fname, (a, l, stmt)) -> let (st', lbl') = compile_with_labels (stmt, lbl) in
-                                [JMP "MAIN";
-                                 LABEL (label_of_proc fname a);
-                                 BEGIN (fname, a, l)]
-                              @ st'
-                              @ [END]) defs)
-                              @ [LABEL "MAIN"]
-                              @ st
-  in code
+                                st
+                              @ [END]
+                              @ List.concat (List.map (fun (fname, (a, l, stmt)) -> let (st', lbl') = compile_with_labels (stmt, lbl) in
+                                [
+                                  LABEL (label_of_proc fname a);
+                                  BEGIN (fname, a, l)
+                                ]
+                                @ st'
+                                @ [END]) defs)
+  in (List.iter print_insn code; code)
