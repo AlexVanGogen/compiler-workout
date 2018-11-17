@@ -222,15 +222,53 @@ let rec compile env code = match code with
                                   CJmp (c, ls)
                                 ]
            )
+      | BEGIN (fname, a, l) ->
+        let _env = env#enter fname a l
+        in (_env,               [
+                                  Push ebp;
+                                  Mov (esp, ebp);
+                                  Binop ("-", M ("$" ^ _env#lsize), esp)
+                                ]
+           )
+      | END ->
+        let ep_lbl = env#epilogue
+        in (env,                [
+                                  Label ep_lbl;
+                                  Mov (ebp, esp);
+                                  Pop ebp;
+                                  Ret;
+                                  Meta (Printf.sprintf "\t.set\t%s,\t%d" env#lsize (env#allocated * word_size))
+                                ]
+        )
+      | RET ret ->
+        let ep_lbl = env#epilogue
+        in let s, _env = env#pop
+        in (_env,               (if ret then [Mov (s, eax)] else [])
+                                @
+                                [Jmp ep_lbl]
+        )
+      | CALL (fname, asize, is_fun) ->
+        let (pushs_n_pops) = List.map (fun v -> (Push v, Pop v)) env#live_registers
+        in let pushs, popsr = List.split pushs_n_pops
+        in let pops = List.rev popsr
+        in let rec push_args env acc n = (match n with | 0 -> env, acc | n -> let (s, _env) = env#pop in push_args _env ((Push s)::acc) (n - 1) )
+        in let _env, pushas = push_args env [] asize
+        in let code' =          pushs
+                                @ pushas
+                                @ [
+                                  Call fname;
+                                  Binop ("+", L (word_size * asize), esp)
+                                ]
+                                @ pops
+        in (if is_fun then let s, _env' = _env#allocate in (_env', code' @ [Mov (eax, s)]) else (_env, code'))
       ) in let (env'', is'') = compile env' code' in (env'', is' @ is'')
                                 
 (* A set of strings *)           
 module S = Set.Make (String)
 
 (* Environment implementation *)
-let rec init_reversed n f = if n == 0 then [f 0] else (f n)::(init_reversed (n - 1) f)
-
-let make_assoc l = List.combine l (List.rev (init_reversed (List.length l) (fun x -> x)))
+let make_assoc l = let rec init l r f = (if l = r then [] else (f l)::(init (l + 1) r f))
+  in List.combine l (init 0 (List.length l) (fun x -> x))
                      
 class env =
   object (self)
